@@ -1,0 +1,15 @@
+# Widget Window Spy Dependencies
+
+# Core PyQt6 for GUI
+PyQt6>=6.4.0
+
+# Image processing
+Pillow>=9.0.0
+
+# System utilities
+psutil>=5.9.0
+pyautogui>=0.9.54
+pyperclip>=1.8.2
+
+# Windows-specific dependencies
+pywin32>=227; sys_platform == "win32"

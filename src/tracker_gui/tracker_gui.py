@@ -1,12 +1,15 @@
-"""TrackerWidget extraction.
+"""TrackerGUI extraction.
 
-Depends on window_detection.find_target_window, mouse_tracker.MouseTracker and screenshot_viewer.ScreenshotViewer.
+Depends on window_detection.find_target_window, mouse_tracker.MouseTracker and screenshot_gui.ScreenshotGUI.
 Implementation copied with minimal changes.
 """
 
 from __future__ import annotations
 from typing import Dict
-import logging, os, subprocess, sys
+import logging
+import os
+import subprocess
+import sys
 from PIL import ImageGrab
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QAction, QFont
@@ -21,13 +24,14 @@ from PyQt6.QtWidgets import (
     QTableWidgetItem,
     QApplication,
 )
-import pyperclip, pyautogui
-from .mouse_tracker import MouseTracker
-from .window_detection import find_target_window
-from .screenshot_viewer import ScreenshotViewer  # Placeholder class currently
+import pyperclip
+import pyautogui
+from shared_utilities.mouse_tracker import MouseTracker
+from shared_utilities.window_detection import find_target_window
+from screenshot_gui import ScreenshotGUI
 
 
-class TrackerWidget(QWidget):
+class TrackerGUI(QWidget):
     def __init__(self, target_process="WidgetInc.exe"):
         super().__init__()
         self.target_process = target_process
@@ -196,14 +200,20 @@ class TrackerWidget(QWidget):
                 return
             bbox = (fx, fy, fx + fw, fy + fh)
             screenshot = ImageGrab.grab(bbox=bbox, all_screens=True)
-            viewer = ScreenshotViewer(self.frame_xy.copy(), screenshot)
+            viewer = ScreenshotGUI(self.frame_xy.copy(), screenshot, parent=self)
             viewer.show()
             if not hasattr(self, "_screenshot_viewers"):
                 self._screenshot_viewers = []
             self._screenshot_viewers.append(viewer)
+
             self.logger.info(f"Screenshot taken: {fw}x{fh} at ({fx}, {fy})")
         except Exception as e:
             self.logger.error(f"Failed to take screenshot: {e}")
+
+    def _remove_viewer(self, viewer):
+        """Remove a screenshot viewer from the tracked list."""
+        if hasattr(self, "_screenshot_viewers") and viewer in self._screenshot_viewers:
+            self._screenshot_viewers.remove(viewer)
 
     def _start_monitoring(self):
         self.monitor_timer = QTimer()
@@ -393,4 +403,13 @@ class TrackerWidget(QWidget):
             self.logger.error(f"Failed to restart application: {e}")
 
     def closeEvent(self, event):
+        """Close all screenshot viewers when TrackerGUI closes."""
+        # Close all open screenshot viewers
+        if hasattr(self, "_screenshot_viewers"):
+            for viewer in self._screenshot_viewers[:]:  # Copy list to avoid modification during iteration
+                if viewer and not viewer.isHidden():
+                    viewer.close()
+            self._screenshot_viewers.clear()
+
+        self.logger.info("TrackerGUI closing - all screenshot viewers closed")
         super().closeEvent(event)

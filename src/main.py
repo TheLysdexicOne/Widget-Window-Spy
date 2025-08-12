@@ -10,9 +10,14 @@ import sys
 import signal
 import argparse
 import logging
-from PyQt6.QtWidgets import QApplication
 
-from tracker.tracker_widget import TrackerWidget
+# Add src directory to Python path to enable absolute imports
+import os
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from PyQt6.QtWidgets import QApplication
+from tracker_gui import TrackerGUI
 
 
 def setup_logging() -> logging.Logger:
@@ -39,7 +44,7 @@ def main():
     logger.info(f"Starting tracker for {args.target}")
 
     app = QApplication(sys.argv)
-    tracker = TrackerWidget(args.target)
+    tracker = TrackerGUI(args.target)
     tracker.show()
 
     def signal_handler(signum, frame):  # noqa: D401, unused params required by signal

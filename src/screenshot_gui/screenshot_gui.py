@@ -1,13 +1,12 @@
-"""Screenshot viewer module (refactored).
+"""Screenshot GUI module (refactored).
 
-Cleaned to remove duplicate method definitions and delegate square/bbox/locate/grid & copy logic to sv_utils utilities.
+Cleaned to remove duplicate method definitions and delegate square/bbox/locate/grid & copy logic to utilities.
 """
 
 # Clean restored implementation of ScreenshotViewer with square + bbox tools
 from __future__ import annotations
 
 import io
-import re
 from typing import Dict
 
 from PIL import Image
@@ -38,8 +37,7 @@ from PyQt6.QtWidgets import (
 )
 
 # Utilities
-from .sv_utils import (
-    CopyModeManager,
+from .utilities import (
     SquareTool,
     BBoxTool,
     create_pixel_grid,
@@ -48,19 +46,20 @@ from .sv_utils import (
     convert_to_scene_coords,
     draw_bbox,
     start_locate_animation,
+    CopyModeManager,
 )
 
 PIXEL_ART_GRID_WIDTH = 192
 PIXEL_ART_GRID_HEIGHT = 128
 
 
-class ScreenshotViewer(QGraphicsView):
+class ScreenshotGUI(QGraphicsView):
     """Screenshot viewer with grid, coordinate banners, locate animation, bbox and 16x16 square tools."""
 
     _LAST_GEOMETRY = None
 
-    def __init__(self, frame_area: Dict, screenshot: Image.Image):
-        super().__init__()
+    def __init__(self, frame_area: Dict, screenshot: Image.Image, parent=None):
+        super().__init__(parent)
         self.frame_area = frame_area
         self.screenshot = screenshot
 
@@ -129,8 +128,8 @@ class ScreenshotViewer(QGraphicsView):
         self.window_widget.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.WindowStaysOnTopHint)
         self.window_widget.resize(1280, 720)
         self.window_widget.setMinimumSize(800, 600)
-        if ScreenshotViewer._LAST_GEOMETRY is not None:
-            self.window_widget.setGeometry(ScreenshotViewer._LAST_GEOMETRY)
+        if ScreenshotGUI._LAST_GEOMETRY is not None:
+            self.window_widget.setGeometry(ScreenshotGUI._LAST_GEOMETRY)
         self.window_widget.installEventFilter(self)
 
         self.setStyleSheet(
@@ -269,8 +268,26 @@ class ScreenshotViewer(QGraphicsView):
         divider.setStyleSheet("QLabel { color: #666666; font-weight: bold; margin: 0 3px; }")
         buttons_layout.addWidget(divider)
 
-        self.draw_square_button = QPushButton("16x16")
-        self.draw_square_button.setFixedSize(32, 24)
+        # Square tool with size controls: [-] [64x64] [+]
+        square_controls_widget = QWidget()
+        square_controls_layout = QHBoxLayout(square_controls_widget)
+        square_controls_layout.setContentsMargins(0, 0, 0, 0)
+        square_controls_layout.setSpacing(1)
+
+        self.square_size_down_button = QPushButton("-")
+        self.square_size_down_button.setFixedSize(16, 24)
+        self.square_size_down_button.clicked.connect(self._on_square_size_down_clicked)
+        self.square_size_down_button.setStyleSheet(
+            """
+            QPushButton { background-color: #e91e63; color: white; border: none; padding: 1px; border-radius: 2px; font-weight: bold; font-size: 8pt; }
+            QPushButton:hover { background-color: #f06292; }
+            QPushButton:pressed { background-color: #c2185b; }
+            QPushButton:disabled { background-color: #666666; }
+        """
+        )
+
+        self.draw_square_button = QPushButton("64x64")
+        self.draw_square_button.setFixedSize(40, 24)
         self.draw_square_button.clicked.connect(self._on_draw_square_clicked)
         self.draw_square_button.setStyleSheet(
             """
@@ -279,7 +296,23 @@ class ScreenshotViewer(QGraphicsView):
             QPushButton:pressed { background-color: #c2185b; }
         """
         )
-        buttons_layout.addWidget(self.draw_square_button)
+
+        self.square_size_up_button = QPushButton("+")
+        self.square_size_up_button.setFixedSize(16, 24)
+        self.square_size_up_button.clicked.connect(self._on_square_size_up_clicked)
+        self.square_size_up_button.setStyleSheet(
+            """
+            QPushButton { background-color: #e91e63; color: white; border: none; padding: 1px; border-radius: 2px; font-weight: bold; font-size: 8pt; }
+            QPushButton:hover { background-color: #f06292; }
+            QPushButton:pressed { background-color: #c2185b; }
+            QPushButton:disabled { background-color: #666666; }
+        """
+        )
+
+        square_controls_layout.addWidget(self.square_size_down_button)
+        square_controls_layout.addWidget(self.draw_square_button)
+        square_controls_layout.addWidget(self.square_size_up_button)
+        buttons_layout.addWidget(square_controls_widget)
 
         line3_layout.addWidget(self.locate_info_label)
         line3_layout.addStretch()
@@ -302,20 +335,30 @@ class ScreenshotViewer(QGraphicsView):
 
         self._update_info_banner()
         self._update_footer_banner()
+        self._update_square_button_states()  # Initialize square button states
         self.window_widget.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
     # --------------- Event Filter ---------------
     def eventFilter(self, obj, event):
         if obj is self.window_widget and event.type() in (QEvent.Type.Close, QEvent.Type.Hide):
             try:
-                ScreenshotViewer._LAST_GEOMETRY = self.window_widget.geometry()
+                ScreenshotGUI._LAST_GEOMETRY = self.window_widget.geometry()
             except Exception:
                 pass
+            # When window_widget closes, also close the ScreenshotGUI
+            if event.type() == QEvent.Type.Close:
+                super().close()  # Close the QGraphicsView part without recursion
         return super().eventFilter(obj, event)
 
     # ---------------- Public API -----------------
     def show(self):  # pragma: no cover (UI)
         self.window_widget.show()
+
+    def close(self):
+        """Close both the graphics view and the window widget."""
+        if hasattr(self, "window_widget"):
+            self.window_widget.close()
+        super().close()
 
     def hasPhoto(self):
         return not self._empty
@@ -499,12 +542,36 @@ class ScreenshotViewer(QGraphicsView):
                     if self.square_tool.rect_item:
                         r = self.square_tool.rect_item.rect()
                         self._last_copied = f"{int(r.left())},{int(r.top())},{int(r.right())},{int(r.bottom())}"
+            self._update_square_button_states()
         else:
-            self.draw_square_button.setText("16x16")
+            self.draw_square_button.setText("64x64")  # Reset to default display
             self.square_tool.clear()
             # Restore pan mode when square mode exits
             if self.hasPhoto():
                 self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
+            self._update_square_button_states()
+
+    # Square size controls
+    def _on_square_size_down_clicked(self):
+        """Decrease square size by 1 grid cell."""
+        self.square_tool.size_down()
+        self._update_square_button_states()
+
+    def _on_square_size_up_clicked(self):
+        """Increase square size by 1 grid cell."""
+        self.square_tool.size_up()
+        self._update_square_button_states()
+
+    def _update_square_button_states(self):
+        """Update square button text and enable/disable size buttons."""
+        # Always get size info, regardless of square visibility
+        size_info = self.square_tool.get_size_info()
+        pixels = size_info["current_size_pixels"]
+        self.draw_square_button.setText(f"{pixels}x{pixels}")
+
+        # Enable/disable size buttons based on limits (works even when square not visible)
+        self.square_size_down_button.setEnabled(size_info["can_size_down"])
+        self.square_size_up_button.setEnabled(size_info["can_size_up"])
 
     # BBOX tool toggle
     def _on_draw_bbox_clicked(self):
@@ -607,6 +674,7 @@ class ScreenshotViewer(QGraphicsView):
                 self._last_view_pos = current
             dx_vp = current.x() - self._last_view_pos.x()
             dy_vp = current.y() - self._last_view_pos.y()
+            # Convert viewport delta to scene delta so movement is raw and zoom-independent
             self.square_tool.apply_motion(dx_vp / scale, dy_vp / scale, scale)
             self._last_view_pos = current
         elif self.draw_bbox_mode and (self.bbox_tool.dragging or self.bbox_tool.resizing):
@@ -643,7 +711,6 @@ class ScreenshotViewer(QGraphicsView):
                 else:
                     self.setCursor(Qt.CursorShape.ArrowCursor)
             else:
-                # Ensure panning remains enabled when not manipulating
                 if self.hasPhoto() and self.dragMode() != QGraphicsView.DragMode.ScrollHandDrag:
                     self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
                 self.setCursor(Qt.CursorShape.ArrowCursor)
@@ -796,3 +863,14 @@ class ScreenshotViewer(QGraphicsView):
             "w": Qt.CursorShape.SizeHorCursor,
             "e": Qt.CursorShape.SizeHorCursor,
         }.get(direction, Qt.CursorShape.ArrowCursor)
+
+    def closeEvent(self, event):
+        """Handle close event - remove self from parent's viewer list if parent exists."""
+        # Close the window widget first
+        if hasattr(self, "window_widget"):
+            self.window_widget.close()
+
+        parent = self.parent()
+        if parent and hasattr(parent, "_remove_viewer") and callable(getattr(parent, "_remove_viewer")):
+            parent._remove_viewer(self)  # type: ignore - parent is TrackerGUI with _remove_viewer method
+        super().closeEvent(event)
